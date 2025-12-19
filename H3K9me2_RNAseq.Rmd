@@ -1,0 +1,821 @@
+---
+title: "H3K9me2_RNAseq"
+author: "Niya_REN"
+date: "2025-11-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librairie
+
+```{r}
+library(pheatmap)
+library(ggplot2)
+```
+
+
+## Fonction utile 
+
+```{r}
+make_df_lineage <- function(lb1_dat, h3k9_dat, col_idx) {
+  data.frame(
+    chr   = lb1_dat$V1,
+    start = as.numeric(lb1_dat$V2),
+    end   = as.numeric(lb1_dat$V3),
+    LB1   = as.numeric(lb1_dat[[col_idx]]),
+    H3K9  = as.numeric(h3k9_dat[[col_idx]])
+  )
+}
+
+scale_no_na <- function(x){
+  
+  m <- mean(x, na.rm = TRUE)
+  s <- sd(x, na.rm = TRUE)
+  (x - m) / s
+  
+}
+
+plot_pheatmap_LB1_H3K9 <- function(df, lineage_name) {
+  # z-score des signaux
+  df$LB1_z  <- scale_no_na(df$LB1)
+  df$H3K9_z <- scale_no_na(df$H3K9)
+
+  cor_mat <- cor(
+    cbind(df$LB1_z, df$H3K9_z),
+    use = "complete.obs",
+    method = "spearman"
+  )
+  rownames(cor_mat) <- colnames(cor_mat) <- c("LB1", "H3K9me2")
+
+  pheatmap(
+    cor_mat,
+    cluster_rows = FALSE,
+    cluster_cols = FALSE,
+    display_numbers = TRUE,
+    number_format = "%.2f",
+    main = paste0("Corrélation LB1 vs H3K9me2 – ", lineage_name, ", chr18"),
+    fontsize_number = 14,
+    legend_labels = "Spearman"
+  )
+}
+
+####################
+
+plot_lb1_chr1 <- function(path_tab, title_prefix, out_prefix = NULL) {
+  tab <- read.table(
+    path_tab,
+    header = TRUE,
+    stringsAsFactors = FALSE,
+    comment.char = "#"
+  )
+
+  mat <- as.matrix(tab[, 4:6])
+  colnames(mat) <- c("ESC", "ParaxMesoderm", "Cardiac")
+
+  mat_z <- apply(mat, 2, scale_no_na)
+  rownames(mat_z) <- paste(tab$chrom, tab$start, tab$end, sep = ":")
+
+  keep_rows <- apply(mat_z, 1, function(v) all(is.finite(v)))
+  mat_z_filt <- mat_z[keep_rows, , drop = FALSE]
+
+  # --- Heatmap z-score ---
+
+  # plot
+  pheatmap(
+    mat_z_filt,
+    cluster_rows   = FALSE,
+    cluster_cols   = TRUE,
+    show_rownames  = FALSE,
+    main           = paste0(title_prefix, " – z-score"),
+    width          = 5,
+    height         = 10
+  )
+
+  # sauvegarde 
+  if (!is.null(out_prefix)) {
+    pheatmap(
+      mat_z_filt,
+      cluster_rows   = FALSE,
+      cluster_cols   = TRUE,
+      show_rownames  = FALSE,
+      main           = paste0(title_prefix, " – z-score"),
+      filename       = paste0(out_prefix, "_zscore.png"),
+      width          = 5,
+      height         = 10
+    )
+  }
+
+  ## --- Discrétisation quartiles ---
+
+  vals <- as.vector(mat_z_filt)
+  brks <- quantile(vals, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+
+  mat_disc <- matrix(
+    as.numeric(cut(
+      vals,
+      breaks = brks,
+      include.lowest = TRUE,
+      labels = 1:4
+    )),
+    nrow = nrow(mat_z_filt),
+    ncol = ncol(mat_z_filt)
+  )
+
+  rownames(mat_disc) <- rownames(mat_z_filt)
+  colnames(mat_disc) <- colnames(mat_z_filt)
+
+  # Plot
+  pheatmap(
+    mat_disc,
+    cluster_rows   = FALSE,
+    cluster_cols   = TRUE,
+    show_rownames  = FALSE,
+    main           = paste0(title_prefix, " – scores quartiles (1–4)"),
+    width          = 5,
+    height         = 10,
+    color          = colorRampPalette(c("navy", "white", "firebrick3"))(4)
+  )
+
+  # sauvegarde
+  if (!is.null(out_prefix)) {
+    pheatmap(
+      mat_disc,
+      cluster_rows   = FALSE,
+      cluster_cols   = TRUE,
+      show_rownames  = FALSE,
+      main           = paste0(title_prefix, " – scores quartiles (1–4)"),
+      filename       = paste0(out_prefix, "_quartiles.png"),
+      width          = 5,
+      height         = 10,
+      color          = colorRampPalette(c("navy", "white", "firebrick3"))(4)
+    )
+  }
+}
+```
+
+
+## HEATMAP
+
+```{r}
+
+# ---------- Région 65–75 Mb ----------
+tab65 <- read.table("Data_Tab/bin50k/LB1_chr7_65_75.tab",
+                    header = TRUE,
+                    stringsAsFactors = FALSE,
+                    comment.char = "#")
+
+colnames(tab65)
+
+# Matrice avec 3 colonnes coord (chrom, start, end) + 12 colonnes de signal
+mat65 <- as.matrix(tab65[, 4:ncol(tab65)])
+
+colnames(mat65) <- c("ESC", "APS",
+                     "DefEcto", "Midbrain", "BorderEcto",
+                     "ParaxMesoderm", "EarlySomite", "EndoProg",
+                     "Cardiac", "Epicard", "MidHindgut", "Liver")
+
+cor65 <- cor(mat65, method = "spearman", use = "pairwise.complete.obs")
+
+pheatmap(cor65,
+         clustering_method = "complete",
+         main = "Corrélations LB1 - chr7:65.5–75 Mb")
+
+# ---------- Région 75–130 Mb ----------
+tab75 <- read.table("Data_Tab/bin50k/LB1_chr7_75_130.tab",
+                    header = TRUE,
+                    stringsAsFactors = FALSE,
+                    comment.char = "#")
+
+# =========================================
+
+mat75 <- as.matrix(tab75[, 4:ncol(tab75)])
+colnames(mat75) <- colnames(mat65)
+
+cor75 <- cor(mat75, method = "spearman", use = "pairwise.complete.obs")
+
+pheatmap(cor75,
+         clustering_method = "complete",
+         main = "Corrélations LB1 - chr7:75–130 Mb")
+
+```
+
+## NUAGE DE POINT
+
+```{r}
+
+df65_MH_Liver <- data.frame(
+  MidHindgut = mat65[, "MidHindgut"],
+  Liver      = mat65[, "Liver"]
+)
+
+cor65_MH_Liver <- cor(df65_MH_Liver$MidHindgut, df65_MH_Liver$Liver,
+                      method = "spearman", use = "complete.obs")
+
+ggplot(df65_MH_Liver, aes(x = MidHindgut, y = Liver)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "LB1 Mid-hindgut (chr7:65.5–75 Mb)",
+    y = "LB1 Liver progenitors (chr7:65.5–75 Mb)",
+    title = paste0("Mid-hindgut vs Liver (Spearman = ",
+                   round(cor65_MH_Liver, 2), ")")
+  ) +
+  theme_minimal()
+
+# ===========================
+
+df75_MH_Liver <- data.frame(
+  MidHindgut = mat75[, "MidHindgut"],
+  Liver      = mat75[, "Liver"]
+)
+
+cor75_MH_Liver <- cor(df75_MH_Liver$MidHindgut, df75_MH_Liver$Liver,
+                      method = "spearman", use = "complete.obs")
+
+ggplot(df75_MH_Liver, aes(x = MidHindgut, y = Liver)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "LB1 Mid-hindgut (chr7:75–130 Mb)",
+    y = "LB1 Liver progenitors (chr7:75–130 Mb)",
+    title = paste0("Mid-hindgut vs Liver (Spearman = ",
+                   round(cor75_MH_Liver, 2), ")")
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+df65_MB_BE <- data.frame(
+  Midbrain   = mat65[, "Midbrain"],
+  BorderEcto = mat65[, "BorderEcto"]
+)
+
+cor65_MB_BE <- cor(df65_MB_BE$Midbrain, df65_MB_BE$BorderEcto,
+                   method = "spearman", use = "complete.obs")
+
+ggplot(df65_MB_BE, aes(x = Midbrain, y = BorderEcto)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "LB1 Midbrain (chr7:65.5–75 Mb)",
+    y = "LB1 Border ectoderm (chr7:65.5–75 Mb)",
+    title = paste0("Midbrain vs Border ectoderm (Spearman = ",
+                   round(cor65_MB_BE, 2), ")")
+  ) +
+  theme_minimal()
+
+
+# ===================================
+
+df75_MB_BE <- data.frame(
+  Midbrain   = mat75[, "Midbrain"],
+  BorderEcto = mat75[, "BorderEcto"]
+)
+
+cor75_MB_BE <- cor(df75_MB_BE$Midbrain, df75_MB_BE$BorderEcto,
+                   method = "spearman", use = "complete.obs")
+
+ggplot(df75_MB_BE, aes(x = Midbrain, y = BorderEcto)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "LB1 Midbrain (chr7:75–130 Mb)",
+    y = "LB1 Border ectoderm (chr7:75–130 Mb)",
+    title = paste0("Midbrain vs Border ectoderm (Spearman = ",
+                   round(cor75_MB_BE, 2), ")")
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+mat65_t <- t(mat65)  
+
+var_bins <- apply(mat65_t, 2, function(v) var(v, na.rm = TRUE))
+
+keep_cols <- which(is.finite(var_bins) & var_bins > 0)
+
+length(keep_cols)     
+mat65_t_filt <- mat65_t[, keep_cols, drop = FALSE]
+
+dim(mat65_t_filt)
+
+# ===================
+
+mat75_t <- t(mat75)
+
+var_bins75  <- apply(mat75_t, 2, function(v) var(v, na.rm = TRUE))
+keep_cols75 <- which(is.finite(var_bins75) & var_bins75 > 0)
+
+mat75_t_filt <- mat75_t[, keep_cols75, drop = FALSE]
+dim(mat75_t_filt)
+
+```
+
+
+```{r}
+pca65 <- prcomp(mat65_t_filt, scale. = TRUE)
+
+samples <- rownames(mat65_t_filt)
+
+feuillet <- c(
+  ESC           = "Pluripotent",
+  APS           = "Pluripotent",
+  DefEcto       = "Ectoderme",
+  Midbrain      = "Ectoderme",
+  BorderEcto    = "Ectoderme",
+  ParaxMesoderm = "Mesoderme",
+  EarlySomite   = "Mesoderme",
+  EndoProg      = "Endoderme",
+  Cardiac       = "Mesoderme",
+  Epicard       = "Mesoderme",
+  MidHindgut    = "Endoderme",
+  Liver         = "Endoderme"
+)
+
+df_pca65 <- data.frame(
+  sample   = samples,
+  PC1      = pca65$x[, 1],
+  PC2      = pca65$x[, 2],
+  feuillet = feuillet[samples]
+)
+
+ggplot(df_pca65, aes(x = PC1, y = PC2, color = feuillet, label = sample)) +
+  geom_point(size = 3) +
+  geom_text(vjust = -0.7, size = 3) +
+  theme_minimal() +
+  labs(
+    title = "ACP LB1 – chr7:65.5–75 Mb",
+    x = "PC1",
+    y = "PC2",
+    color = "Feuillet"
+  )
+
+
+# =======================
+
+pca75 <- prcomp(mat75_t_filt, scale. = TRUE)
+
+samples75 <- rownames(mat75_t_filt)
+
+df_pca75 <- data.frame(
+  sample   = samples75,
+  PC1      = pca75$x[, 1],
+  PC2      = pca75$x[, 2],
+  feuillet = feuillet[samples75]
+)
+
+ggplot(df_pca75, aes(x = PC1, y = PC2, color = feuillet, label = sample)) +
+  geom_point(size = 3) +
+  geom_text(vjust = -0.7, size = 3) +
+  theme_minimal() +
+  labs(
+    title = "ACP LB1 – chr7:75–130 Mb",
+    x = "PC1",
+    y = "PC2",
+    color = "Feuillet"
+  )
+```
+
+
+## Heatmap LB1 ESC / Cardiac / ParaMeso
+
+```{r}
+#--------------------- ESC / Cardiac / ParaMeso Genome --------------
+
+tab_Genome = read.table("Data_Tab/bin100k/LB1_ESC_Parax_Cardiac_genome_100kb.tab",
+                        header = TRUE,
+                        stringsAsFactors = FALSE,
+                        comment.char = "#")
+
+mat_3genome <- as.matrix(tab65[, 4:ncol(tab_Genome)])
+
+colnames(mat_3genome) <- c("ESC", "ParaxMesoderm", "Cardiac")
+
+mat_3genome_scaled <- apply(mat_3genome, 2, scale_no_na)
+mat_3genome_scaled <- as.matrix(mat_3genome_scaled)
+colnames(mat_3genome_scaled) <- colnames(mat_3genome)
+
+#--------------------- whole Genome --------------
+
+tabAll <- read.table("Data_Tab/bin100k/LB1_genome_100kb.tab",
+                     header = TRUE,
+                     stringsAsFactors = FALSE,
+                     comment.char = "#")
+
+# colonnes 1–3 = chr / start / end, le reste = 12 lignées
+matAll <- as.matrix(tabAll[, 4:ncol(tabAll)])
+
+colnames(matAll) <- c(
+  "ESC", "APS",
+  "DefEcto", "Midbrain", "BorderEcto",
+  "ParaxMesoderm", "EarlySomite", "EndoProg",
+  "Cardiac", "Epicard", "MidHindgut", "Liver"
+)
+
+matAll_scaled <- apply(matAll, 2, scale_no_na)
+matAll_scaled <- as.matrix(matAll_scaled)
+colnames(matAll_scaled) <- colnames(matAll)
+
+#---------------------- HEATMAP -------------------
+
+cor_genome <- cor(mat_3genome_scaled,
+                  method = "spearman",
+                  use = "pairwise.complete.obs")
+
+corAll <- cor(matAll_scaled,
+              method = "spearman",
+              use = "pairwise.complete.obs")
+
+pheatmap(cor_genome,
+         clustering_method = "complete",
+         main = "Corrélation LB1 scale - ESC / ParaxMesoderm / Cardiac")
+
+pheatmap(corAll,
+          clustering_method = "complete",
+          main = "Corrélations LB1 scalées – whole genome (bins 100 kb)"
+)
+
+
+```
+
+## Hierarchique Cluster
+
+```{r}
+
+
+distAll <- as.dist(1 - corAll)
+
+hcAll <- hclust(distAll, method = "complete")
+
+plot(hcAll,
+     main = "Clustering hiérarchique – LB1 scale",
+     xlab = "", sub = "")
+
+
+rect.hclust(hcAll, k = 3, border = "red")
+
+groupsAll <- cutree(hcAll, k = 3)
+groupsAll
+# -----------------------------------------------
+
+cor3 <- cor(mat_3genome_scaled,
+            method = "spearman",
+            use = "pairwise.complete.obs")
+
+dist3 <- as.dist(1 - cor3)
+
+hc3 <- hclust(dist3, method = "complete")
+
+plot(hc3,
+     main = "Clustering hiérarchique – ESC / ParaxMesoderm / Cardiac",
+     xlab = "", sub = "")
+
+cutree(hc3, k = 3)  # par ex. 3 groupes
+
+```
+## Analyse Chromosome 18 LB1 vs H3K9
+
+Nous remarquons sur UCSC que la région 5.6 Mb - 10.8 mb (bras long du chromosome)
+
+```{r}
+
+lb1_Esc_ParaMe_Card  <- read.table(
+  "Data_Tab/bin50k/LB1_chr18_ESC_Parax_Cardiac_50kb.tab",
+  header = FALSE, stringsAsFactors = FALSE, sep = "\t", quote = ""
+)
+
+h3k9_Esc_ParaMe_Card <- read.table(
+  "Data_Tab/bin50k/H3K9_chr18_ESC_Parax_Cardiac_50kb.tab",
+  header = FALSE, stringsAsFactors = FALSE, sep = "\t", quote = ""
+)
+
+# Pour éviter de refaire de nouveaux fichier tab, on va juste filtrer le track souhaité
+# On doit donc garder exceptionnellement le header qui est en commentaire "#"
+
+lb1_3types_dat  <- lb1_Esc_ParaMe_Card[-1, ]
+h3k9_3types_dat <- h3k9_Esc_ParaMe_Card[-1, ]
+
+# =========== Cardiac Nuage =========
+
+df_card  <- make_df_lineage(lb1_3types_dat, h3k9_3types_dat, 6)
+df_card$LB1_z  <- scale_no_na(df_card$LB1)
+df_card$H3K9_z <- scale_no_na(df_card$H3K9)
+
+# Corrélation LB1 vs H3K9me2 sur chr18
+cor_chr18_card <- cor(df_card$LB1_z, df_card$H3K9_z,
+                      method = "spearman", use = "complete.obs")
+cor_chr18_card
+
+
+ggplot(df_card, aes(x = LB1_z, y = H3K9_z)) +
+  geom_point(alpha = 0.3, size = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Cardiac – chr18, LB1 vs H3K9me2 (50 kb, signaux scalés)",
+    x = "LB1 (z-score)",
+    y = "H3K9me2 (z-score)"
+  )
+
+# ====== ESC / ParaMeso / Cardiac HEATMAP ======
+
+
+df_ESC   <- make_df_lineage(lb1_3types_dat, h3k9_3types_dat, 4)
+df_Parax <- make_df_lineage(lb1_3types_dat, h3k9_3types_dat, 5)
+
+df_ESC$LB1_z  <- scale_no_na(df_ESC$LB1)
+df_Parax$H3K9_z <- scale_no_na(df_Parax$H3K9)
+
+plot_pheatmap_LB1_H3K9(df_ESC,   "ESC")
+plot_pheatmap_LB1_H3K9(df_Parax, "ParaxMesoderm")
+plot_pheatmap_LB1_H3K9(df_card,  "Cardiac")
+
+
+```
+
+```{r}
+
+mat_chr18 <- cbind(
+  ESC_LB1   = as.numeric(lb1_Esc_ParaMe_Card$V4),
+  Parax_LB1 = as.numeric(lb1_Esc_ParaMe_Card$V5),
+  Card_LB1  = as.numeric(lb1_Esc_ParaMe_Card$V6),
+  ESC_H3K9  = as.numeric(h3k9_Esc_ParaMe_Card$V4),
+  Parax_H3K9= as.numeric(h3k9_Esc_ParaMe_Card$V5),
+  Card_H3K9 = as.numeric(h3k9_Esc_ParaMe_Card$V6)
+)
+
+mat_chr18 <- mat_chr18[complete.cases(mat_chr18), ]
+
+mat_chr18_z <- apply(mat_chr18, 2, scale_no_na)
+cor_tracks <- cor(mat_chr18_z, use = "pairwise.complete.obs",
+                  method = "spearman")
+
+annotation_col <- data.frame(
+  Marque   = c("LB1", "LB1", "LB1", "H3K9me2", "H3K9me2", "H3K9me2"),
+  Lignée   = c("ESC", "Parax", "Cardiac", "ESC", "Parax", "Cardiac")
+)
+row.names(annotation_col) <- colnames(cor_tracks)
+
+pheatmap(
+  cor_tracks,
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "average",
+  annotation_col = annotation_col,
+  display_numbers = TRUE,
+  number_format = "%.2f",
+  main = "Heatmap – LB1 vs H3K9me2 (chr18)",
+  fontsize_number = 10
+)
+
+#================
+
+dist_tracks <- as.dist(1 - cor_tracks)
+hc_tracks <- hclust(dist_tracks, method = "average")
+
+
+plot(hc_tracks, main = "Clustering hiérarchique – LB1 & H3K9me2 (chr18)")
+
+
+rect.hclust(hc_tracks, k = 2, border = "red")
+
+```
+
+```{r}
+
+lb1_all <- read.table(
+  "Data_TAB/bin50k/LB1_rep1_rep2_genome_50kb.tab",
+  header = TRUE,
+  stringsAsFactors = FALSE,
+  sep = "\t",
+  comment.char = "#"
+)
+
+# colonnes 1–3 = coord, le reste = signaux
+mat <- as.matrix(lb1_all[, 4:ncol(lb1_all)])
+mode(mat) <- "numeric"
+
+new_names <- c(
+  "ESC_r1", "APS_r1", "BorderEcto_r1", "Midbrain_r1",
+  "DefEcto_r1", "EarlySomite_r1", "EndoProg_r1",
+  "Epicard_r1", "MidHindgut_r1", "Liver_r1",
+  "ParaxMesoderm_r1", "Cardiac_r1",
+  "ESC_r2", "APS_r2", "BorderEcto_r2", "Midbrain_r2",
+  "DefEcto_r2", "EarlySomite_r2", "EndoProg_r2",
+  "Epicard_r2", "Liver_r2", "MidHindgut_r2",
+  "ParaxMesoderm_r2", "Cardiac_r2"
+)
+
+colnames(mat) <- new_names
+
+mat_t <- t(mat)   # échantillons x bins
+
+# variance de chaque bin à travers les échantillons
+var_bins <- apply(mat_t, 2, function(v) var(v, na.rm = TRUE))
+
+# garder les bins informatifs (variance > 0, finie)
+keep_cols <- which(is.finite(var_bins) & var_bins > 0)
+length(keep_cols)
+
+mat_t_filt <- mat_t[, keep_cols, drop = FALSE]
+dim(mat_t_filt)
+
+# ===== ACP ====
+
+pca_all <- prcomp(mat_t_filt, scale. = TRUE)
+
+samples <- rownames(mat_t_filt)
+
+# rep1 / rep2
+Rep <- ifelse(grepl("_r1$", samples), "rep1", "rep2")
+
+# lignée sans le suffixe
+Lineage <- sub("_r[12]$", "", samples)
+
+df_pca <- data.frame(
+  sample  = samples,
+  PC1     = pca_all$x[, 1],
+  PC2     = pca_all$x[, 2],
+  Rep     = Rep,
+  Lineage = Lineage
+)
+
+head(df_pca)
+
+# ==============
+
+ggplot(df_pca,
+       aes(x = PC1, y = PC2,
+           color = Lineage, shape = Rep, label = Lineage)) +
+  geom_point(size = 3) +
+  geom_text(vjust = -0.7, size = 3) +
+  theme_minimal() +
+  labs(
+    title = "ACP LB1 (rep1 vs rep2, génome entier, 50 kb)",
+    x = "PC1",
+    y = "PC2",
+    color = "Lignée",
+    shape = "Rep"
+  )
+
+
+```
+## Bin10k ESC / Cardiac / ParaMeso
+
+```{r}
+
+```
+
+## LB1 vs H3K9
+
+```{r}
+
+tab <- read.table(
+  "Data_TAB/bin10k/LB1_ESC_vs_H3K9_chr1_10kb.tab",
+  header = TRUE,
+  stringsAsFactors = FALSE,
+  sep = "\t",
+  comment.char = "#"
+)
+
+# colonnes 1–3 = coord, le reste = signaux
+mat <- as.matrix(tab[, 4:ncol(tab)])
+mode(mat) <- "numeric"
+
+colnames(mat) <- c(
+  "ESC_LB1",
+  "ESC_H3K9", "APS_H3K9", "BorderEcto_H3K9", "Midbrain_H3K9",
+  "DefEcto_H3K9", "EarlySomite_H3K9", "EndoProg_H3K9",
+  "Epicard_H3K9", "MidHindgut_H3K9", "Liver_H3K9",
+  "ParaxMesoderm_H3K9"
+)
+
+mat_z <- apply(mat, 2, scale_no_na)
+rownames(mat_z) <- paste(tab$chrom, tab$start, tab$end, sep = ":")
+
+# on enlève NA/Inf
+keep_rows <- apply(mat_z, 1, function(v) all(is.finite(v)))
+mat_z_filt <- mat_z[keep_rows, , drop = FALSE]
+
+pheatmap(
+  mat_z_filt,
+  cluster_rows = FALSE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  main = "LB1 ESC et H3K9me2 – chr1 (10 kb, z-score)"
+)
+
+# heatmap  corrélations  pistes
+cor_mat <- cor(mat_z_filt, method = "spearman", use = "pairwise.complete.obs")
+pheatmap(
+  cor_mat,
+  main = "Corrélations – ESC LB1 vs H3K9me2 (chr1, 10 kb)",
+  display_numbers = TRUE
+)
+```
+```{r}
+
+# ---------- Discrétisation 4 classes ----------
+
+vals <- as.vector(mat1_z_filt)
+
+# quartiles globales
+brks <- quantile(
+  vals, 
+  probs = c(0, 0.25, 0.5, 0.75, 1), 
+  na.rm = TRUE)
+
+mat1_disc <- matrix(
+  as.numeric(cut(vals,
+                 breaks = brks,
+                 include.lowest = TRUE,
+                 labels = 1:4)),
+  nrow = nrow(mat1_z_filt),
+  ncol = ncol(mat1_z_filt)
+)
+
+rownames(mat1_disc) <- rownames(mat1_z_filt)
+colnames(mat1_disc) <- colnames(mat1_z_filt)
+
+# ---------- Heatmap discrétisés ----------
+
+pheatmap(
+  mat1_disc,
+  cluster_rows   = FALSE,
+  cluster_cols   = FALSE,
+  show_rownames  = FALSE,
+  main           = "LB1 – chr1 (10 kb) – ESC / Parax / Cardiac\nscores quartiles (1–4)",
+  width          = 5,
+  height         = 10,
+  color          = colorRampPalette(c("navy", "white", "firebrick3"))(4)
+)
+
+
+# LB1 vs ALL
+
+vals_all <- as.vector(mat_z_filt)
+
+brks_all <- quantile(
+  vals_all,
+  probs = c(0, 0.25, 0.5, 0.75, 1),
+  na.rm = TRUE
+)
+
+
+mat_disc_all <- matrix(
+  as.numeric(cut(
+    vals_all,
+    breaks = brks_all,
+    include.lowest = TRUE,
+    labels = 1:4
+  )),
+  nrow = nrow(mat_z_filt),
+  ncol = ncol(mat_z_filt)
+)
+
+rownames(mat_disc_all) <- rownames(mat_z_filt)
+colnames(mat_disc_all) <- colnames(mat_z_filt)
+
+pheatmap(
+  mat_disc_all,
+  cluster_rows  = FALSE, 
+  cluster_cols  = TRUE,
+  show_rownames = FALSE,
+  main          = "LB1 ESC + H3K9me2 – chr1 (10 kb, scores 1–4)",
+  width         = 5,
+  height        = 12,
+  color         = colorRampPalette(c("navy", "white", "firebrick3"))(4)
+)
+
+```
+```{r}
+
+# 10kb
+plot_lb1_chr1(
+  "Data_TAB/bin10k/LB1_chr1_ESC_Parax_Cardiac_10kb.tab",
+  title_prefix = "LB1 chr1 – 10 kb – ESC / Parax / Cardiac",
+  out_prefix   = "Heatmpap_LB1_chr1_ESC_Parax_Cardiac_10kb"
+)
+
+#50kb
+plot_lb1_chr1(
+  "Data_TAB/bin50k/LB1_chr1_ESC_Parax_Cardiac_50kb.tab",
+  title_prefix = "LB1 chr1 – 50 kb – ESC / Parax / Cardiac",
+  out_prefix   = "Heatmpap_LB1_chr1_ESC_Parax_Cardiac_50kb"
+)
+
+#100kb
+plot_lb1_chr1(
+  "Data_Tab/bin100k/LB1_chr1_ESC_Parax_Cardiac_100kb.tab",
+  title_prefix = "LB1 chr1 – 100 kb – ESC / Parax / Cardiac",
+  out_prefix   = "Heatmpap_LB1_chr1_ESC_Parax_Cardiac_100kb"
+)
+
+```
+
