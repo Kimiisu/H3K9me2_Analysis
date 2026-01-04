@@ -14,6 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(pheatmap)
 library(ggplot2)
+library(dplyr)
 ```
 
 
@@ -393,7 +394,7 @@ tab_Genome = read.table("Data_Tab/bin100k/LB1_ESC_Parax_Cardiac_genome_100kb.tab
                         stringsAsFactors = FALSE,
                         comment.char = "#")
 
-mat_3genome <- as.matrix(tab65[, 4:ncol(tab_Genome)])
+mat_3genome <- as.matrix(tab_Genome[, 4:ncol(tab_Genome)])
 
 colnames(mat_3genome) <- c("ESC", "ParaxMesoderm", "Cardiac")
 
@@ -666,11 +667,7 @@ ggplot(df_pca,
 
 
 ```
-## Bin10k ESC / Cardiac / ParaMeso
 
-```{r}
-
-```
 
 ## LB1 vs H3K9
 
@@ -719,81 +716,8 @@ pheatmap(
   display_numbers = TRUE
 )
 ```
-```{r}
+# HEATMAP Z_SCore et QUARTILE 
 
-# ---------- Discrétisation 4 classes ----------
-
-vals <- as.vector(mat1_z_filt)
-
-# quartiles globales
-brks <- quantile(
-  vals, 
-  probs = c(0, 0.25, 0.5, 0.75, 1), 
-  na.rm = TRUE)
-
-mat1_disc <- matrix(
-  as.numeric(cut(vals,
-                 breaks = brks,
-                 include.lowest = TRUE,
-                 labels = 1:4)),
-  nrow = nrow(mat1_z_filt),
-  ncol = ncol(mat1_z_filt)
-)
-
-rownames(mat1_disc) <- rownames(mat1_z_filt)
-colnames(mat1_disc) <- colnames(mat1_z_filt)
-
-# ---------- Heatmap discrétisés ----------
-
-pheatmap(
-  mat1_disc,
-  cluster_rows   = FALSE,
-  cluster_cols   = FALSE,
-  show_rownames  = FALSE,
-  main           = "LB1 – chr1 (10 kb) – ESC / Parax / Cardiac\nscores quartiles (1–4)",
-  width          = 5,
-  height         = 10,
-  color          = colorRampPalette(c("navy", "white", "firebrick3"))(4)
-)
-
-
-# LB1 vs ALL
-
-vals_all <- as.vector(mat_z_filt)
-
-brks_all <- quantile(
-  vals_all,
-  probs = c(0, 0.25, 0.5, 0.75, 1),
-  na.rm = TRUE
-)
-
-
-mat_disc_all <- matrix(
-  as.numeric(cut(
-    vals_all,
-    breaks = brks_all,
-    include.lowest = TRUE,
-    labels = 1:4
-  )),
-  nrow = nrow(mat_z_filt),
-  ncol = ncol(mat_z_filt)
-)
-
-rownames(mat_disc_all) <- rownames(mat_z_filt)
-colnames(mat_disc_all) <- colnames(mat_z_filt)
-
-pheatmap(
-  mat_disc_all,
-  cluster_rows  = FALSE, 
-  cluster_cols  = TRUE,
-  show_rownames = FALSE,
-  main          = "LB1 ESC + H3K9me2 – chr1 (10 kb, scores 1–4)",
-  width         = 5,
-  height        = 12,
-  color         = colorRampPalette(c("navy", "white", "firebrick3"))(4)
-)
-
-```
 ```{r}
 
 # 10kb
@@ -816,6 +740,242 @@ plot_lb1_chr1(
   title_prefix = "LB1 chr1 – 100 kb – ESC / Parax / Cardiac",
   out_prefix   = "Heatmpap_LB1_chr1_ESC_Parax_Cardiac_100kb"
 )
+
+```
+
+## CAPTATION DE REGION HIERARCHIQUES 
+
+
+```{r}
+
+tab100 <- read.table(
+  "Data_Tab/bin100k/LB1_chr1_ESC_Parax_Cardiac_100kb.tab",
+  header = FALSE,
+  stringsAsFactors = FALSE
+)
+
+colnames(tab100) <- c("chr", "start", "end",
+                      "ESC", "ParaxMesoderm", "Cardiac")
+
+mat100 <- as.matrix(tab100[, 4:6])
+mode(mat100) <- "numeric"
+
+scale_no_na <- function(x) {
+  m <- mean(x, na.rm = TRUE)
+  s <- sd(x,   na.rm = TRUE)
+  (x - m) / s
+}
+
+mat100_z <- apply(mat100, 2, scale_no_na)
+mat100_z <- as.matrix(mat100_z)
+
+#NA/Inf
+keep_rows100 <- apply(mat100_z, 1, function(v) all(is.finite(v)))
+mat100_z_filt <- mat100_z[keep_rows100, , drop = FALSE]
+tab100_filt   <- tab100[keep_rows100, ]
+
+#----------------------------
+
+
+# Détection bins hiérarchiques
+
+
+df100 <- cbind(
+  tab100_filt[, 1:3],              # chr / start / end
+  as.data.frame(mat100_z_filt)     # ESC / Parax / Cardiac z-score
+)
+colnames(df100)[1:3] <- c("chr", "start", "end")
+
+head(df100)
+
+df100$d1 <- df100$ParaxMesoderm - df100$ESC
+df100$d2 <- df100$Cardiac      - df100$ParaxMesoderm
+
+
+# Seuil (en z-score)
+threshold <- 0.3
+
+df100 <- df100 %>%
+  mutate(
+    pattern = case_when(
+      d1 >  threshold & d2 >  threshold ~ "ESC < Parax < Cardiac",
+      d1 < -threshold & d2 < -threshold ~ "ESC > Parax > Cardiac",
+      TRUE ~ "Non hiérarchique / similaire"
+    )
+  )
+
+df100_hier <- df100 %>%
+  filter(pattern != "Non hiérarchique / similaire") %>%
+  mutate(region_id = row_number())
+
+#--------------------
+
+summary_patterns <- df100 %>%
+  count(pattern) %>%
+  mutate(freq = n / sum(n))
+
+summary_patterns
+
+ggplot(summary_patterns,
+       aes(x = pattern, y = freq, fill = pattern)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(
+    title = "Répartition des bins selon l'ordre ESC / Parax / Cardiac (LB1, chr1, 100 kb)",
+    x = "",
+    y = "Proportion de bins"
+  ) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.position = "none")
+
+prop.table(table(df100$pattern))
+
+
+```
+
+```{r}
+df_hier <- df100[df100$pattern != "Non hiérarchique / similaire", ]
+
+df_hier$mid <- (df_hier$start + df_hier$end) / 2
+
+ggplot(df_hier, aes(x = mid, y = pattern, color = pattern)) +
+  geom_point(alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    x = "Position sur chr1 (bp)",
+    y = "",
+    title = "Position des bins hiérarchiques sur chr1 (LB1, 100 kb)"
+  )
+
+```
+Tentative pour 10kb en local
+
+```{r}
+
+# --- chr1, 10 kb global ---
+
+tab10 <- read.table(
+  "Data_Tab/bin10k/LB1_chr1_ESC_Parax_Cardiac_10kb.tab",
+  header = FALSE,
+  stringsAsFactors = FALSE
+)
+
+colnames(tab10) <- c("chr", "start", "end",
+                     "ESC", "ParaxMesoderm", "Cardiac")
+
+mat10 <- as.matrix(tab10[, 4:6])
+mode(mat10) <- "numeric"
+
+mat10_z <- apply(mat10, 2, scale_no_na)
+mat10_z <- as.matrix(mat10_z)
+
+keep_rows10   <- apply(mat10_z, 1, function(v) all(is.finite(v)))
+mat10_z_filt  <- mat10_z[keep_rows10, , drop = FALSE]
+tab10_filt    <- tab10[keep_rows10, ]
+
+df10 <- cbind(
+  tab10_filt[, 1:3],
+  as.data.frame(mat10_z_filt)
+)
+colnames(df10)[1:3] <- c("chr", "start", "end")
+
+
+
+###############
+
+
+# pour chaque bin 100 kb hiérarchique, on prend les 10 kb inclus
+sub_list <- lapply(seq_len(nrow(df100_hier)), function(i){
+  r <- df100_hier[i, ]
+  sub <- df10 %>%
+    filter(chr == r$chr,
+           start >= r$start,
+           end   <= r$end)
+  if (nrow(sub) == 0) return(NULL)
+  sub$parent_pattern <- r$pattern
+  sub$region_id      <- r$region_id
+  sub
+})
+
+df10_local <- do.call(rbind, sub_list)
+dim(df10_local)
+head(df10_local)
+
+
+################
+
+df10_local <- df10_local %>%
+  mutate(
+    d1_10 = ParaxMesoderm - ESC,
+    d2_10 = Cardiac       - ParaxMesoderm,
+    pattern10 = case_when(
+      d1_10 >  threshold & d2_10 >  threshold ~ "ESC < Parax < Cardiac",
+      d1_10 < -threshold & d2_10 < -threshold ~ "ESC > Parax > Cardiac",
+      TRUE ~ "Non hiérarchique / similaire"
+    )
+  )
+
+###################
+
+local_summary <- df10_local %>%
+  group_by(region_id, parent_pattern) %>%
+  summarise(
+    n_bins   = n(),
+    n_same   = sum(pattern10 == parent_pattern),
+    prop_same = n_same / n_bins,
+    start100 = min(start),
+    end100   = max(end),
+    .groups = "drop"
+  )
+
+local_summary
+
+# Résumé par région
+df_prop <- local_summary %>%
+  dplyr::select(region_id,
+                parent_pattern,
+                prop_keep = prop_same)
+
+
+###############
+
+ggplot(local_summary,
+       aes(x = parent_pattern, y = prop_same, color = parent_pattern)) +
+  geom_jitter(width = 0.1, height = 0, size = 2, alpha = 0.8) +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  ylim(0, 1) +
+  theme_minimal() +
+  labs(
+    title = "Stabilité des motifs hiérarchiques à 10 kb\n(dans les régions hiérarchiques à 100 kb)",
+    x = "Motif à 100 kb",
+    y = "Proportion de bins 10 kb avec le même ordre"
+  )
+
+ggplot(local_summary,
+       aes(x = (start100 + end100)/2,
+           y = prop_same,
+           color = parent_pattern)) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Cohérence locale (10 kb) des régions hiérarchiques (100 kb)\nLB1, chr1",
+    x = "Position sur chr1 (bp)",
+    y = "Proportion de bins 10 kb cohérents"
+  )
+
+```
+```{r}
+
+table(df100$pattern) / nrow(df100)
+
+# Proportions 10 kb par motif parent
+df_prop %>%
+  group_by(parent_pattern) %>%
+  summarise(
+    median_prop = median(prop_keep),
+    q1 = quantile(prop_keep, 0.25),
+    q3 = quantile(prop_keep, 0.75)
+  )
 
 ```
 
